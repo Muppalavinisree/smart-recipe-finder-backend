@@ -113,6 +113,9 @@ async function getMealsFromAPI(keyword) {
   }
 }
 
+app.get("/", (req, res) => {
+  res.send("🍳 Smart Recipe Assistant backend is running successfully on Render!");
+});
 
 // 💬 Main Chat Endpoint
 app.post("/api/chat", async (req, res) => {
@@ -167,6 +170,7 @@ app.post("/api/chat", async (req, res) => {
 });
 
 
-app.listen(5000, () =>
-  console.log("✅ Smart Recipe Assistant running on http://localhost:5000")
-);
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => {
+  console.log(`✅ Smart Recipe Assistant running on port ${PORT}`);
+});
