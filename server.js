@@ -1,6 +1,6 @@
 import express from "express";
 import dotenv from "dotenv";
-import fetch from "node-fetch";
+import axios from "axios";
 import cors from "cors";
 import stringSimilarity from "string-similarity";
 
@@ -96,26 +96,25 @@ const localRecipes = [
   },
 ];
 
-// Fetch Meals from MealDB
+//  Fetch Meals from MealDB using Axios
 async function getMealsFromAPI(keyword) {
   try {
-    const res = await fetch(
+    const res = await axios.get(
       `https://www.themealdb.com/api/json/v1/1/search.php?s=${keyword}`
     );
-    const data = await res.json();
-    return data.meals ? data.meals.slice(0, 5) : [];
+    return res.data.meals ? res.data.meals.slice(0, 5) : [];
   } catch (e) {
-    console.error("MealDB error:", e.message);
+    console.error("MealDB axios error:", e.message);
     return [];
   }
 }
 
-// Root route
+//  Root route
 app.get("/", (req, res) => {
   res.send("🍳 Smart Recipe Assistant backend running (LocalDB → MealDB → Gemini)");
 });
 
-// Chat Route
+//  Chat Route
 app.post("/api/chat", async (req, res) => {
   try {
     let { prompt } = req.body;
@@ -144,7 +143,7 @@ app.post("/api/chat", async (req, res) => {
       .join(" ");
     console.log("🔤 Corrected input:", msg);
 
-    // Step 1: LocalDB match (fuzzy + flexible)
+    // Step 1: LocalDB match
     const localMatch = localRecipes.filter((r) =>
       r.keywords.some((k) => msg.includes(k))
     );
@@ -159,14 +158,13 @@ app.post("/api/chat", async (req, res) => {
 ${r.ingredients.map((i) => `- ${i}`).join("\n")}
 
 ### 👨‍🍳 Steps
-${r.steps.map((s, i) => `${i + 1}. ${s}`).join("\n")}
-`
+${r.steps.map((s, i) => `${i + 1}. ${s}`).join("\n")}`
         )
         .join("\n\n");
       return res.json({ reply });
     }
 
-    //  Step 2: MealDB fallback
+    // Step 2: MealDB fallback
     const keyword = msg.split(" ")[0];
     const meals = await getMealsFromAPI(keyword);
 
@@ -178,38 +176,34 @@ ${r.steps.map((s, i) => `${i + 1}. ${s}`).join("\n")}
       return res.json({ reply });
     }
 
-    //  Step 3: Gemini fallback
+    // Step 3: Gemini fallback (using Axios)
     try {
-      const aiRes = await fetch(
+      const aiRes = await axios.post(
         `https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
         {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            contents: [
-              {
-                parts: [
-                  {
-                    text: `You are a recipe assistant. User said: "${prompt}". 
+          contents: [
+            {
+              parts: [
+                {
+                  text: `You are a recipe assistant. User said: "${prompt}". 
 If it's a single word (like 'chicken'), suggest 3–5 related dishes. 
 If it asks for "how to make" or "ingredients", return a clear, Markdown-formatted recipe.`,
-                  },
-                ],
-              },
-            ],
-          }),
-        }
+                },
+              ],
+            },
+          ],
+        },
+        { headers: { "Content-Type": "application/json" } }
       );
 
-      const aiData = await aiRes.json();
       const aiText =
-        aiData?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+        aiRes.data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
 
       if (aiText && !aiText.toLowerCase().includes("sorry")) {
         return res.json({ reply: aiText });
       }
     } catch (err) {
-      console.error("Gemini failed:", err.message);
+      console.error("Gemini axios error:", err.message);
     }
 
     // 🪫 Step 4: Default fallback
@@ -219,7 +213,9 @@ If it asks for "how to make" or "ingredients", return a clear, Markdown-formatte
     });
   } catch (err) {
     console.error("❌ Server Error:", err);
-    res.status(500).json({ error: err.message || "Failed to process the request" });
+    res
+      .status(500)
+      .json({ error: err.message || "Failed to process the request" });
   }
 });
 
