@@ -96,7 +96,7 @@ const localRecipes = [
   },
 ];
 
-//  Fetch Meals from MealDB using Axios
+//  Fetch Meals from MealDB
 async function getMealsFromAPI(keyword) {
   try {
     const res = await axios.get(
@@ -104,7 +104,7 @@ async function getMealsFromAPI(keyword) {
     );
     return res.data.meals ? res.data.meals.slice(0, 5) : [];
   } catch (e) {
-    console.error("MealDB axios error:", e.message);
+    console.error("MealDB error:", e.message);
     return [];
   }
 }
@@ -123,7 +123,7 @@ app.post("/api/chat", async (req, res) => {
 
     let msg = prompt.toLowerCase().trim();
 
-    // Step 0: Fuzzy spelling correction
+    //  Step 0: Fuzzy correction
     const allKeywords = [
       "chicken",
       "paneer",
@@ -134,16 +134,16 @@ app.post("/api/chat", async (req, res) => {
       "egg",
       "sandwich",
     ];
-    const words = msg.split(" ");
-    msg = words
-      .map((w) => {
-        const match = stringSimilarity.findBestMatch(w, allKeywords).bestMatch;
-        return match.rating > 0.5 ? match.target : w;
-      })
-      .join(" ");
+
+    const correctedWords = msg.split(" ").map((w) => {
+      const match = stringSimilarity.findBestMatch(w, allKeywords).bestMatch;
+      return match.rating > 0.5 ? match.target : w;
+    });
+
+    msg = correctedWords.join(" ");
     console.log("🔤 Corrected input:", msg);
 
-    // Step 1: LocalDB match
+    //  Step 1: LocalDB match
     const localMatch = localRecipes.filter((r) =>
       r.keywords.some((k) => msg.includes(k))
     );
@@ -164,19 +164,38 @@ ${r.steps.map((s, i) => `${i + 1}. ${s}`).join("\n")}`
       return res.json({ reply });
     }
 
-    // Step 2: MealDB fallback
-    const keyword = msg.split(" ")[0];
-    const meals = await getMealsFromAPI(keyword);
+    //  Step 2: MealDB multi-keyword search
+    let allMeals = [];
+    for (const word of correctedWords) {
+      const meals = await getMealsFromAPI(word);
+      if (meals.length > 0) {
+        allMeals.push(
+          ...meals.map((m) => ({
+            name: m.strMeal,
+            thumb: m.strMealThumb,
+          }))
+        );
+      }
+    }
 
-    if (meals.length > 0) {
+    // Remove duplicates
+    allMeals = allMeals.filter(
+      (v, i, a) => a.findIndex((t) => t.name === v.name) === i
+    );
+
+    if (allMeals.length > 0) {
       console.log("🍴 MealDB results found");
-      const reply = `Here are some ${keyword} dishes:\n${meals
-        .map((m) => `🍴 ${m.strMeal}`)
-        .join("\n")}`;
+      const reply =
+        "🍴 Here are some dishes based on your ingredients:\n\n" +
+        allMeals
+          .slice(0, 6)
+          .map((m) => `🍽️ **${m.name}**\n![${m.name}](${m.thumb})`)
+          .join("\n\n") +
+        "\n\nWould you like the recipe for any of these?";
       return res.json({ reply });
     }
 
-    // Step 3: Gemini fallback (using Axios)
+    // Step 3: Gemini fallback
     try {
       const aiRes = await axios.post(
         `https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
@@ -192,21 +211,19 @@ If it asks for "how to make" or "ingredients", return a clear, Markdown-formatte
               ],
             },
           ],
-        },
-        { headers: { "Content-Type": "application/json" } }
+        }
       );
 
       const aiText =
         aiRes.data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
-
       if (aiText && !aiText.toLowerCase().includes("sorry")) {
         return res.json({ reply: aiText });
       }
     } catch (err) {
-      console.error("Gemini axios error:", err.message);
+      console.error("Gemini failed:", err.message);
     }
 
-    // 🪫 Step 4: Default fallback
+    // Step 4: Default fallback
     return res.json({
       reply:
         "😕 Sorry, I couldn’t find that recipe. Try something like 'chicken', 'paneer', 'rice', or 'snacks'.",
@@ -219,6 +236,6 @@ If it asks for "how to make" or "ingredients", return a clear, Markdown-formatte
   }
 });
 
-// Start server
+// Start Server
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
