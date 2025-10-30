@@ -62,10 +62,15 @@ app.get("/", (req, res) => {
 // Chat route
 app.post("/api/chat", async (req, res) => {
   try {
+    console.log("📩 Received prompt:", req.body);  // 👈 Add this line
+
     const { prompt } = req.body;
     if (!prompt) {
       return res.status(400).json({ error: "Missing 'prompt' in request body" });
     }
+
+
+
 
     const msg = prompt.toLowerCase();
 
@@ -161,10 +166,11 @@ Keep it friendly and concise.`,
       aiResponse.data?.candidates?.[0]?.content?.parts?.[0]?.text ||
       "Sorry, I couldn’t generate a response.";
     res.json({ reply: botReply });
-  } catch (err) {
-    console.error("❌ Server Error:", err.response?.data || err.message);
-    res.status(500).json({ error: "Failed to fetch AI response" });
-  }
+ } catch (err) {
+  console.error("❌ Server Error (Full):", err.response?.data || err.message);
+  res.status(500).json({ error: "Failed to fetch AI response" });
+}
+
 });
 
 //Start server
