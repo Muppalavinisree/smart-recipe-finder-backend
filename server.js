@@ -5,7 +5,16 @@ import cors from "cors";
 
 dotenv.config();
 const app = express();
-app.use(cors());
+app.use(
+  cors({
+    origin: [
+      "http://localhost:5173", // local dev
+      "https://smart-recipe-finder-frontend.onrender.com" // deployed frontend
+    ],
+    methods: ["GET", "POST"],
+    allowedHeaders: ["Content-Type"],
+  })
+);
 app.use(express.json());
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
