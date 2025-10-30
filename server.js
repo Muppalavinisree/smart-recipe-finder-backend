@@ -6,17 +6,10 @@ import cors from "cors";
 dotenv.config();
 const app = express();
 
-app.use(
-  cors({
-    origin: [
-      "http://localhost:5173", // local dev
-      "https://smart-recipe-finder-frontend.onrender.com", // your frontend
-      "https://codesandbox.io", // sandbox testing
-    ],
-    methods: ["GET", "POST"],
-    allowedHeaders: ["Content-Type"],
-  })
-);
+app.use(cors({
+  origin: ["http://localhost:5173", "https://codesandbox.io/p/github/Muppalavinisree/smart-recipe-finder-frontend", "https://codesandbox.io"],
+}));
+
 
 app.use(express.json());
 
