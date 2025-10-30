@@ -2,26 +2,29 @@ import express from "express";
 import dotenv from "dotenv";
 import axios from "axios";
 import cors from "cors";
-import stringSimilarity from "string-similarity";
 
 dotenv.config();
 const app = express();
 
+// -----------------------------
+// Middleware
+// -----------------------------
 app.use(
   cors({
     origin: [
       "http://localhost:5173",
-      "https://codesandbox.io/p/github/Muppalavinisree/smart-recipe-finder-frontend",
+      "https://smart-recipe-finder-frontend.onrender.com",
       "https://codesandbox.io",
     ],
   })
 );
-
 app.use(express.json());
 
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
 
-//  Local Recipe Database
+// -----------------------------
+// Local Recipe Database
+// -----------------------------
 const localRecipes = [
   {
     name: "Chicken Biryani",
@@ -94,63 +97,145 @@ const localRecipes = [
       "Cut and serve warm.",
     ],
   },
+  {
+    name: "Gulab Jamun",
+    keywords: ["dessert", "sweet", "gulab", "gulab jamun", "sweets"],
+    ingredients: [
+      "1 cup milk powder",
+      "1/4 cup all-purpose flour",
+      "A pinch of baking soda",
+      "2 tbsp ghee",
+      "Warm milk (to knead)",
+      "Sugar syrup with cardamom and rose water",
+    ],
+    steps: [
+      "Mix milk powder, flour, baking soda, and ghee.",
+      "Add milk gradually to form a soft dough.",
+      "Shape into small balls and fry on low heat until golden.",
+      "Soak in warm sugar syrup for 1 hour.",
+    ],
+  },
 ];
 
-//  Fetch Meals from MealDB
+// -----------------------------
+// Levenshtein Correction
+// -----------------------------
+function levenshtein(a = "", b = "") {
+  const n = a.length;
+  const m = b.length;
+  if (n === 0) return m;
+  if (m === 0) return n;
+
+  const matrix = Array.from({ length: n + 1 }, () => new Array(m + 1));
+  for (let i = 0; i <= n; i++) matrix[i][0] = i;
+  for (let j = 0; j <= m; j++) matrix[0][j] = j;
+
+  for (let i = 1; i <= n; i++) {
+    for (let j = 1; j <= m; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      matrix[i][j] = Math.min(
+        matrix[i - 1][j] + 1,
+        matrix[i][j - 1] + 1,
+        matrix[i - 1][j - 1] + cost
+      );
+    }
+  }
+  return matrix[n][m];
+}
+
+const allKeywords = [
+  "chicken",
+  "paneer",
+  "rice",
+  "snack",
+  "snacks",
+  "dessert",
+  "sweet",
+  "biryani",
+  "egg",
+  "sandwich",
+  "sandwiches",
+];
+
+function correctToken(token) {
+  if (!token || token.length <= 1) return token;
+
+  let best = token;
+  let bestDist = Infinity;
+
+  for (const kw of allKeywords) {
+    const dist = levenshtein(token, kw);
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = kw;
+    }
+  }
+
+  const threshold = Math.max(1, Math.floor(best.length * 0.35));
+  return bestDist <= threshold ? best : token;
+}
+
+// -----------------------------
+// MealDB Helper
+// -----------------------------
 async function getMealsFromAPI(keyword) {
   try {
     const res = await axios.get(
-      `https://www.themealdb.com/api/json/v1/1/search.php?s=${keyword}`
+      `https://www.themealdb.com/api/json/v1/1/search.php?s=${encodeURIComponent(
+        keyword
+      )}`
     );
     return res.data.meals ? res.data.meals.slice(0, 5) : [];
   } catch (e) {
-    console.error("MealDB error:", e.message);
+    console.error("MealDB error:", e.message || e);
     return [];
   }
 }
 
-//  Root route
+// -----------------------------
+// Routes
+// -----------------------------
 app.get("/", (req, res) => {
   res.send("🍳 Smart Recipe Assistant backend running (LocalDB → MealDB → Gemini)");
 });
 
-//  Chat Route
 app.post("/api/chat", async (req, res) => {
   try {
-    let { prompt } = req.body;
-    if (!prompt)
+    const raw = (req.body.prompt || req.body.message || "").toString();
+    if (!raw)
       return res.status(400).json({ error: "Missing 'prompt' in request body" });
 
-    let msg = prompt.toLowerCase().trim();
+    const normalized = raw.toLowerCase().replace(/[,;!?]/g, " ");
+    const tokens = normalized
+      .split(/\b(?:and|with|&)\b|\s+/)
+      .map((t) => t.trim())
+      .filter(Boolean);
 
-    //  Step 0: Fuzzy correction
-    const allKeywords = [
-      "chicken",
-      "paneer",
-      "rice",
-      "snack",
-      "dessert",
-      "biryani",
-      "egg",
-      "sandwich",
-    ];
+    const correctedTokens = tokens.map((t) => correctToken(t));
+    const uniqueTokens = Array.from(new Set(correctedTokens));
 
-    const correctedWords = msg.split(" ").map((w) => {
-      const match = stringSimilarity.findBestMatch(w, allKeywords).bestMatch;
-      return match.rating > 0.5 ? match.target : w;
-    });
+    console.log("🔤 Raw input:", raw);
+    console.log("🔤 Tokens:", tokens);
+    console.log("🔤 Corrected:", uniqueTokens);
 
-    msg = correctedWords.join(" ");
-    console.log("🔤 Corrected input:", msg);
+    // ----------------- Step 1: Local DB -----------------
+    const scoredLocal = localRecipes
+      .map((r) => {
+        const matches = uniqueTokens.filter((tk) =>
+          r.keywords.some((k) => k.includes(tk) || tk.includes(k))
+        );
+        return { recipe: r, score: matches.length };
+      })
+      .filter((s) => s.score > 0)
+      .sort((a, b) => b.score - a.score);
 
-    //  Step 1: LocalDB match
-    const localMatch = localRecipes.filter((r) =>
-      r.keywords.some((k) => msg.includes(k))
-    );
+    if (scoredLocal.length > 0) {
+      const topScore = scoredLocal[0].score;
+      const topMatches = scoredLocal
+        .filter((s) => s.score === topScore)
+        .map((s) => s.recipe);
 
-    if (localMatch.length > 0) {
-      console.log("✅ LocalDB Match Found!");
-      const reply = localMatch
+      const reply = topMatches
         .map(
           (r) => `🍽️ **${r.name}**
 
@@ -164,38 +249,51 @@ ${r.steps.map((s, i) => `${i + 1}. ${s}`).join("\n")}`
       return res.json({ reply });
     }
 
-    //  Step 2: MealDB multi-keyword search
+    // ----------------- Step 2: MealDB -----------------
     let allMeals = [];
-    for (const word of correctedWords) {
-      const meals = await getMealsFromAPI(word);
+    for (const tk of uniqueTokens) {
+      if (tk.length < 2) continue;
+      const meals = await getMealsFromAPI(tk);
       if (meals.length > 0) {
         allMeals.push(
           ...meals.map((m) => ({
             name: m.strMeal,
             thumb: m.strMealThumb,
+            id: m.idMeal,
           }))
         );
       }
     }
 
-    // Remove duplicates
     allMeals = allMeals.filter(
       (v, i, a) => a.findIndex((t) => t.name === v.name) === i
     );
 
     if (allMeals.length > 0) {
-      console.log("🍴 MealDB results found");
       const reply =
         "🍴 Here are some dishes based on your ingredients:\n\n" +
         allMeals
-          .slice(0, 6)
-          .map((m) => `🍽️ **${m.name}**\n![${m.name}](${m.thumb})`)
+          .slice(0, 8)
+          .map(
+            (m) =>
+              `🍽️ **${m.name}**\n${
+                m.thumb ? `![${m.name}](${m.thumb})` : ""
+              }`
+          )
           .join("\n\n") +
         "\n\nWould you like the recipe for any of these?";
       return res.json({ reply });
     }
 
-    // Step 3: Gemini fallback
+    // ----------------- Step 3: Gemini Fallback -----------------
+    if (!GEMINI_API_KEY) {
+      console.warn("⚠️ GEMINI_API_KEY missing, skipping AI fallback.");
+      return res.json({
+        reply:
+          "😕 I couldn't find recipes in local DB or MealDB, and AI key is missing. Try simpler keywords like 'chicken' or 'paneer'.",
+      });
+    }
+
     try {
       const aiRes = await axios.post(
         `https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
@@ -204,38 +302,40 @@ ${r.steps.map((s, i) => `${i + 1}. ${s}`).join("\n")}`
             {
               parts: [
                 {
-                  text: `You are a recipe assistant. User said: "${prompt}". 
-If it's a single word (like 'chicken'), suggest 3–5 related dishes. 
-If it asks for "how to make" or "ingredients", return a clear, Markdown-formatted recipe.`,
+                  text: `You are a helpful recipe assistant. The user said: "${raw}". 
+If the user listed ingredients, suggest 3–5 dishes that use them and give one Markdown recipe.`,
                 },
               ],
             },
           ],
-        }
+        },
+        { headers: { "Content-Type": "application/json" } }
       );
 
-      const aiText =
-        aiRes.data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
-      if (aiText && !aiText.toLowerCase().includes("sorry")) {
-        return res.json({ reply: aiText });
-      }
+      const aiText = aiRes.data?.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (aiText && aiText.trim()) return res.json({ reply: aiText });
     } catch (err) {
-      console.error("Gemini failed:", err.message);
+      console.error("Gemini error:", err?.response?.data || err.message);
     }
 
-    // Step 4: Default fallback
+    // ----------------- Final Fallback -----------------
     return res.json({
       reply:
-        "😕 Sorry, I couldn’t find that recipe. Try something like 'chicken', 'paneer', 'rice', or 'snacks'.",
+        "😕 Sorry, I couldn’t find a recipe for that. Try: 'chicken', 'paneer', 'rice', 'snacks', or 'how to make sandwich'.",
     });
   } catch (err) {
     console.error("❌ Server Error:", err);
-    res
-      .status(500)
-      .json({ error: err.message || "Failed to process the request" });
+    return res.json({
+      reply:
+        "⚠️ Oops — something went wrong. Please try again or ask about 'chicken' or 'paneer'.",
+    });
   }
 });
 
+// -----------------------------
 // Start Server
+// -----------------------------
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
+app.listen(PORT, () =>
+  console.log(`✅ Server running on port ${PORT}`)
+);
