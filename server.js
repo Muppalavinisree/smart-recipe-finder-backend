@@ -176,10 +176,13 @@ Keep it friendly and concise.`,
       aiData?.candidates?.[0]?.content?.parts?.[0]?.text ||
       "Sorry, I couldn’t generate a response.";
     res.json({ reply: botReply });
-  } catch (err) {
-    console.error("❌ Server Error (Full):", err.message);
-    res.status(500).json({ error: "Failed to fetch AI response" });
-  }
+ } catch (err) {
+  console.error("❌ Server Error (Full):", err);
+  res.status(500).json({
+    error: err.message || "Failed to fetch AI response",
+  });
+}
+
 });
 
 // ✅ Start the server on Render
