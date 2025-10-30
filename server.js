@@ -2,6 +2,7 @@ import express from "express";
 import dotenv from "dotenv";
 import fetch from "node-fetch";
 import cors from "cors";
+import stringSimilarity from "string-similarity"; // 🧠 Fuzzy spelling fix
 
 dotenv.config();
 const app = express();
@@ -20,7 +21,7 @@ app.use(express.json());
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
-// ⚙️ Local Fallback Database
+// 🍛 Local Recipe Database
 const localRecipes = [
   {
     name: "Chicken Biryani",
@@ -95,7 +96,7 @@ const localRecipes = [
   },
 ];
 
-// 🥗 Fetch meals from MealDB
+// 🍽️ Fetch Meals from MealDB
 async function getMealsFromAPI(keyword) {
   try {
     const res = await fetch(
@@ -109,105 +110,47 @@ async function getMealsFromAPI(keyword) {
   }
 }
 
-// 🍳 Fetch ingredients for a given meal
-async function getIngredientsFromAPI(mealName) {
-  try {
-    const res = await fetch(
-      `https://www.themealdb.com/api/json/v1/1/search.php?s=${mealName}`
-    );
-    const data = await res.json();
-
-    if (data.meals && data.meals[0]) {
-      const meal = data.meals[0];
-      const ingredients = [];
-
-      for (let i = 1; i <= 20; i++) {
-        const ingredient = meal[`strIngredient${i}`];
-        const measure = meal[`strMeasure${i}`];
-        if (ingredient)
-          ingredients.push(`- ${measure || ""} ${ingredient}`.trim());
-      }
-
-      return `
-🍽️ **${meal.strMeal}**
-### 🧂 Ingredients
-${ingredients.join("\n")}
-
-🔗 [See image](${meal.strMealThumb})
-`;
-    }
-    return null;
-  } catch (err) {
-    console.error("Ingredient fetch error:", err.message);
-    return null;
-  }
-}
-
 // 🌐 Root route
 app.get("/", (req, res) => {
-  res.send("🍳 Smart Recipe Assistant backend running on Render!");
+  res.send("🍳 Smart Recipe Assistant backend running (LocalDB → MealDB → Gemini)");
 });
 
-// 💬 Chat route
+// 💬 Chat Route
 app.post("/api/chat", async (req, res) => {
   try {
-    const { prompt } = req.body;
+    let { prompt } = req.body;
     if (!prompt)
       return res.status(400).json({ error: "Missing 'prompt' in request body" });
 
-    const msg = prompt.toLowerCase().trim();
+    let msg = prompt.toLowerCase().trim();
 
-    // 1️⃣ GEMINI AI first
-    try {
-      const aiRes = await fetch(
-        `https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            contents: [
-              {
-                parts: [
-                  {
-                    text: `You are a recipe assistant. User said: "${prompt}". If it's a single word like 'chicken', suggest 3–5 dishes containing it. If it asks for how to make or ingredients, give detailed markdown recipe.`,
-                  },
-                ],
-              },
-            ],
-          }),
-        }
-      );
+    // 🧠 Step 0: Fuzzy Spelling Correction
+    const allKeywords = [
+      "chicken",
+      "paneer",
+      "rice",
+      "snack",
+      "dessert",
+      "biryani",
+      "egg",
+      "sandwich",
+    ];
+    const words = msg.split(" ");
+    msg = words
+      .map((w) => {
+        const match = stringSimilarity.findBestMatch(w, allKeywords).bestMatch;
+        return match.rating > 0.5 ? match.target : w;
+      })
+      .join(" ");
+    console.log("🔤 Corrected input:", msg);
 
-      const aiData = await aiRes.json();
-      const aiText =
-        aiData?.candidates?.[0]?.content?.parts?.[0]?.text || "";
-
-      // If Gemini gave something reasonable, return it
-      if (aiText && !aiText.toLowerCase().includes("sorry")) {
-        return res.json({ reply: aiText });
-      }
-    } catch (err) {
-      console.error("Gemini failed:", err.message);
-    }
-
-    // 2️⃣ If Gemini fails → use MealDB
-    const keyword = msg.split(" ")[0];
-    const meals = await getMealsFromAPI(keyword);
-
-    if (meals.length > 0) {
-      const reply = `Here are some ${keyword} dishes:\n${meals
-        .map((m) => `🍴 ${m.strMeal}`)
-        .join("\n")}`;
-      return res.json({ reply });
-    }
-
-    // 3️⃣ If MealDB fails → local fallback
-    const matches = localRecipes.filter((r) =>
+    // 🥇 Step 1: LocalDB first
+    const localMatch = localRecipes.filter((r) =>
       r.keywords.some((k) => msg.includes(k))
     );
 
-    if (matches.length > 0) {
-      const reply = matches
+    if (localMatch.length > 0) {
+      const reply = localMatch
         .map(
           (r) => `
 🍽️ **${r.name}**
@@ -220,26 +163,69 @@ ${r.steps.map((s, i) => `${i + 1}. ${s}`).join("\n")}
 `
         )
         .join("\n\n");
-
       return res.json({ reply });
     }
 
-    // 4️⃣ Final fallback
+    // 🥈 Step 2: MealDB fallback
+    const keyword = msg.split(" ")[0];
+    const meals = await getMealsFromAPI(keyword);
+
+    if (meals.length > 0) {
+      const reply = `Here are some ${keyword} dishes:\n${meals
+        .map((m) => `🍴 ${m.strMeal}`)
+        .join("\n")}`;
+      return res.json({ reply });
+    }
+
+    // 🥉 Step 3: Gemini AI fallback
+    try {
+      const aiRes = await fetch(
+        `https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [
+              {
+                parts: [
+                  {
+                    text: `You are a recipe assistant. User said: "${prompt}". 
+If it's a single word (like 'chicken'), suggest 3–5 related dishes. 
+If it asks for "how to make" or "ingredients", return a clear, Markdown-formatted recipe.`,
+                  },
+                ],
+              },
+            ],
+          }),
+        }
+      );
+
+      const aiData = await aiRes.json();
+      const aiText =
+        aiData?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+
+      if (aiText && !aiText.toLowerCase().includes("sorry")) {
+        return res.json({ reply: aiText });
+      }
+    } catch (err) {
+      console.error("Gemini failed:", err.message);
+    }
+
+    // 🪫 Step 4: Final fallback message
     return res.json({
       reply:
-        "😕 Sorry, I couldn’t find that recipe. Try 'chicken', 'paneer', 'rice', or 'snacks'.",
+        "😕 Sorry, I couldn’t find that recipe. Try something like 'chicken', 'paneer', 'rice', or 'snacks'.",
     });
   } catch (err) {
-    console.error("❌ Server Error (Full):", err);
-    res
-      .status(500)
-      .json({ error: err.message || "Failed to fetch AI response" });
+    console.error("❌ Server Error:", err);
+    res.status(500).json({
+      error: err.message || "Failed to process the request",
+    });
   }
 });
 
-// ✅ Start server
+// 🚀 Start Server
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`✅ Server running on port ${PORT}`);
 });
-
