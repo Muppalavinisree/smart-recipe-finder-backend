@@ -2,7 +2,7 @@ import express from "express";
 import dotenv from "dotenv";
 import fetch from "node-fetch";
 import cors from "cors";
-import stringSimilarity from "string-similarity"; // 🧠 Fuzzy spelling fix
+import stringSimilarity from "string-similarity"; 
 
 dotenv.config();
 const app = express();
@@ -21,7 +21,7 @@ app.use(express.json());
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
-// 🍛 Local Recipe Database
+//  Local Recipe Database
 const localRecipes = [
   {
     name: "Chicken Biryani",
@@ -96,7 +96,7 @@ const localRecipes = [
   },
 ];
 
-// 🍽️ Fetch Meals from MealDB
+//  Fetch Meals from MealDB
 async function getMealsFromAPI(keyword) {
   try {
     const res = await fetch(
@@ -110,12 +110,12 @@ async function getMealsFromAPI(keyword) {
   }
 }
 
-// 🌐 Root route
+//  Root route
 app.get("/", (req, res) => {
   res.send("🍳 Smart Recipe Assistant backend running (LocalDB → MealDB → Gemini)");
 });
 
-// 💬 Chat Route
+// Chat Route
 app.post("/api/chat", async (req, res) => {
   try {
     let { prompt } = req.body;
@@ -124,7 +124,7 @@ app.post("/api/chat", async (req, res) => {
 
     let msg = prompt.toLowerCase().trim();
 
-    // 🧠 Step 0: Fuzzy Spelling Correction
+    //  Step 0: Fuzzy Spelling Correction
     const allKeywords = [
       "chicken",
       "paneer",
@@ -177,7 +177,7 @@ ${r.steps.map((s, i) => `${i + 1}. ${s}`).join("\n")}
       return res.json({ reply });
     }
 
-    // 🥉 Step 3: Gemini AI fallback
+    // Step 3: Gemini AI fallback
     try {
       const aiRes = await fetch(
         `https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
@@ -224,7 +224,7 @@ If it asks for "how to make" or "ingredients", return a clear, Markdown-formatte
   }
 });
 
-// 🚀 Start Server
+//Start Server
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`✅ Server running on port ${PORT}`);
