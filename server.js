@@ -10,7 +10,7 @@ app.use(express.json());
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
-// 🔹 1. Fetch meals from MealDB
+// Fetch meals from MealDB
 async function getMealsFromAPI(keyword) {
   try {
     const { data } = await axios.get(
@@ -23,7 +23,7 @@ async function getMealsFromAPI(keyword) {
   }
 }
 
-// 🔹 2. Fetch ingredients for a given meal
+// Fetch ingredients for a given meal
 async function getIngredientsFromAPI(mealName) {
   try {
     const { data } = await axios.get(
@@ -54,12 +54,12 @@ ${ingredients.join("\n")}
   }
 }
 
-// 🔹 3. Root route
+// Root route
 app.get("/", (req, res) => {
   res.send("🍳 Smart Recipe Assistant backend running with Gemini 2.5 Flash!");
 });
 
-// 🔹 4. Chat route
+// Chat route
 app.post("/api/chat", async (req, res) => {
   try {
     const { prompt } = req.body;
@@ -69,7 +69,7 @@ app.post("/api/chat", async (req, res) => {
 
     const msg = prompt.toLowerCase();
 
-    // 🧂 Case 1: Asking for ingredients
+    //  Case 1: Asking for ingredients
     if (msg.includes("ingredient")) {
       const mealName = msg
         .replace(
@@ -107,7 +107,7 @@ app.post("/api/chat", async (req, res) => {
       return res.json({ reply: ingredientReply });
     }
 
-    // 👨‍🍳 Case 2: Asking "how to make ..."
+    //  Case 2: Asking "how to make ..."
     if (msg.includes("how to make")) {
       const mealName = msg.replace(/how to make|how can i make|make/i, "").trim();
 
@@ -139,7 +139,7 @@ Keep it friendly and concise.`,
       return res.json({ reply: botReply });
     }
 
-    // 🍛 Case 3: Detect general food keywords → show suggestions
+    //  Case 3: Detect general food keywords → show suggestions
     const keywords = ["paneer", "chicken", "egg", "rice", "dessert", "pasta", "vegan"];
     const key = keywords.find((k) => msg.includes(k));
     if (key) {
@@ -150,7 +150,7 @@ Keep it friendly and concise.`,
       }
     }
 
-    // 🤖 Case 4: Fallback — Gemini handles any other query
+    // Case 4: Fallback — Gemini handles any other query
     const aiResponse = await axios.post(
       `https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
       { contents: [{ parts: [{ text: prompt }] }] },
@@ -167,7 +167,7 @@ Keep it friendly and concise.`,
   }
 });
 
-// 🔹 5. Start server
+//Start server
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () =>
   console.log(`✅ Smart Recipe Assistant (Gemini 2.5 Flash) running on port ${PORT}`)
