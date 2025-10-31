@@ -6,9 +6,6 @@ import cors from "cors";
 dotenv.config();
 const app = express();
 
-// -----------------------------
-// Middleware
-// -----------------------------
 app.use(
   cors({
     origin: [
@@ -125,11 +122,9 @@ function levenshtein(a = "", b = "") {
   const m = b.length;
   if (n === 0) return m;
   if (m === 0) return n;
-
   const matrix = Array.from({ length: n + 1 }, () => new Array(m + 1));
   for (let i = 0; i <= n; i++) matrix[i][0] = i;
   for (let j = 0; j <= m; j++) matrix[0][j] = j;
-
   for (let i = 1; i <= n; i++) {
     for (let j = 1; j <= m; j++) {
       const cost = a[i - 1] === b[j - 1] ? 0 : 1;
@@ -159,10 +154,8 @@ const allKeywords = [
 
 function correctToken(token) {
   if (!token || token.length <= 1) return token;
-
   let best = token;
   let bestDist = Infinity;
-
   for (const kw of allKeywords) {
     const dist = levenshtein(token, kw);
     if (dist < bestDist) {
@@ -170,7 +163,6 @@ function correctToken(token) {
       best = kw;
     }
   }
-
   const threshold = Math.max(1, Math.floor(best.length * 0.35));
   return bestDist <= threshold ? best : token;
 }
@@ -181,9 +173,7 @@ function correctToken(token) {
 async function getMealsFromAPI(keyword) {
   try {
     const res = await axios.get(
-      `https://www.themealdb.com/api/json/v1/1/search.php?s=${encodeURIComponent(
-        keyword
-      )}`
+      `https://www.themealdb.com/api/json/v1/1/search.php?s=${encodeURIComponent(keyword)}`
     );
     return res.data.meals ? res.data.meals.slice(0, 5) : [];
   } catch (e) {
@@ -196,7 +186,7 @@ async function getMealsFromAPI(keyword) {
 // Routes
 // -----------------------------
 app.get("/", (req, res) => {
-  res.send("🍳 Smart Recipe Assistant backend running (LocalDB → MealDB → Gemini)");
+  res.send("🍳 Smart Recipe Assistant backend running (LocalDB → Gemini → MealDB)");
 });
 
 app.post("/api/chat", async (req, res) => {
@@ -249,7 +239,34 @@ ${r.steps.map((s, i) => `${i + 1}. ${s}`).join("\n")}`
       return res.json({ reply });
     }
 
-    // ----------------- Step 2: MealDB -----------------
+    // ----------------- Step 2: Gemini Fallback -----------------
+    if (GEMINI_API_KEY) {
+      try {
+        const aiRes = await axios.post(
+          `https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
+          {
+            contents: [
+              {
+                parts: [
+                  {
+                    text: `You are a helpful recipe assistant. The user said: "${raw}". 
+If the user listed ingredients, suggest 3–5 dishes that use them and give one Markdown recipe.`,
+                  },
+                ],
+              },
+            ],
+          },
+          { headers: { "Content-Type": "application/json" } }
+        );
+
+        const aiText = aiRes.data?.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (aiText && aiText.trim()) return res.json({ reply: aiText });
+      } catch (err) {
+        console.error("Gemini error:", err?.response?.data || err.message);
+      }
+    }
+
+    // ----------------- Step 3: MealDB (last fallback) -----------------
     let allMeals = [];
     for (const tk of uniqueTokens) {
       if (tk.length < 2) continue;
@@ -285,57 +302,18 @@ ${r.steps.map((s, i) => `${i + 1}. ${s}`).join("\n")}`
       return res.json({ reply });
     }
 
-    // ----------------- Step 3: Gemini Fallback -----------------
-    if (!GEMINI_API_KEY) {
-      console.warn("⚠️ GEMINI_API_KEY missing, skipping AI fallback.");
-      return res.json({
-        reply:
-          "😕 I couldn't find recipes in local DB or MealDB, and AI key is missing. Try simpler keywords like 'chicken' or 'paneer'.",
-      });
-    }
-
-    try {
-      const aiRes = await axios.post(
-        `https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
-        {
-          contents: [
-            {
-              parts: [
-                {
-                  text: `You are a helpful recipe assistant. The user said: "${raw}". 
-If the user listed ingredients, suggest 3–5 dishes that use them and give one Markdown recipe.`,
-                },
-              ],
-            },
-          ],
-        },
-        { headers: { "Content-Type": "application/json" } }
-      );
-
-      const aiText = aiRes.data?.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (aiText && aiText.trim()) return res.json({ reply: aiText });
-    } catch (err) {
-      console.error("Gemini error:", err?.response?.data || err.message);
-    }
-
     // ----------------- Final Fallback -----------------
     return res.json({
       reply:
-        "😕 Sorry, I couldn’t find a recipe for that. Try: 'chicken', 'paneer', 'rice', 'snacks', or 'how to make sandwich'.",
+        "😕 Sorry, I couldn’t find a recipe for that. Try: 'chicken', 'paneer', or 'sandwich'.",
     });
   } catch (err) {
     console.error("❌ Server Error:", err);
     return res.json({
-      reply:
-        "⚠️ Oops — something went wrong. Please try again or ask about 'chicken' or 'paneer'.",
+      reply: "⚠️ Oops — something went wrong. Please try again later.",
     });
   }
 });
 
-// -----------------------------
-// Start Server
-// -----------------------------
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () =>
-  console.log(`✅ Server running on port ${PORT}`)
-);
+app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
